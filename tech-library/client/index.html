@@ -977,125 +977,392 @@
     </footer>
 
     <script>
-        // Простая логика для демонстрации (ваша команда заменит на Supabase)
-        document.addEventListener('DOMContentLoaded', function () {
-            const themeToggle = document.getElementById('themeToggle');
-            const clearFilters = document.getElementById('clearFilters');
-            const searchInput = document.getElementById('searchInput');
-            const applyFiltersBtn = document.getElementById('applyFilters');
-            const booksGrid = document.getElementById('booksGrid');
-            const totalBooks = document.getElementById('totalBooks');
-            const totalBooksMain = document.getElementById('totalBooksMain');
-            const shownBooks = document.getElementById('shownBooks');
+    // Конфигурация
+    const API_BASE_URL = window.location.hostname === 'localhost' 
+        ? 'http://localhost:3000/api'
+        : 'https://bnqyvdiqvbywwuxjsdft.supabase.co';
+    
+    const BOOKS_PER_PAGE = 9;
+    let currentPage = 1;
+    let currentFilters = {};
 
-            // Тема
-            themeToggle.addEventListener('click', () => {
-                const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-                document.documentElement.setAttribute('data-theme', isDark ? 'light' : 'dark');
-                themeToggle.innerHTML = isDark ? '<i class="fas fa-moon"></i>' : '<i class="fas fa-sun"></i>';
+    // DOM элементы
+    const themeToggle = document.getElementById('themeToggle');
+    const clearFilters = document.getElementById('clearFilters');
+    const searchInput = document.getElementById('searchInput');
+    const booksGrid = document.getElementById('booksGrid');
+    const totalBooks = document.getElementById('totalBooks');
+    const totalBooksMain = document.getElementById('totalBooksMain');
+    const shownBooks = document.getElementById('shownBooks');
+    const applyFiltersBtn = document.getElementById('applyFilters');
+    const sortBtn = document.getElementById('sortBtn');
+    const viewToggle = document.getElementById('viewToggle');
+    const pagination = document.getElementById('pagination');
+
+    // Инициализация
+    document.addEventListener('DOMContentLoaded', async () => {
+        // Загружаем книги
+        await loadBooks();
+        
+        // Загружаем статистику
+        await loadStats();
+        
+        // Настраиваем обработчики событий
+        setupEventListeners();
+    });
+
+    // Загрузка книг
+    async function loadBooks(filters = {}, page = 1) {
+        try {
+            booksGrid.classList.add('data-loading');
+            
+            // Формируем параметры запроса
+            const params = new URLSearchParams({
+                page,
+                limit: BOOKS_PER_PAGE,
+                ...filters
             });
 
-            // Сброс фильтров
-            clearFilters.addEventListener('click', () => {
-                document.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
-                document.querySelectorAll('input[type="radio"]').forEach(rb => {
-                    if (rb.id === 'year-all') rb.checked = true;
-                    else rb.checked = false;
-                });
-                document.querySelectorAll('.tag').forEach(tag => tag.classList.remove('active'));
-                searchInput.value = '';
-                updateBookCount();
-            });
+            const response = await fetch(`${API_BASE_URL}/books?${params}`);
+            const result = await response.json();
 
-            // Поиск
-            searchInput.addEventListener('input', debounce(() => {
-                updateBookCount();
-            }, 300));
-
-            // Применение фильтров
-            applyFiltersBtn.addEventListener('click', () => {
-                booksGrid.classList.add('data-loading');
-                setTimeout(() => {
-                    booksGrid.classList.remove('data-loading');
-                    booksGrid.classList.add('data-loaded');
-                    updateBookCount();
-                }, 500);
-            });
-
-            // Теги
-            document.querySelectorAll('.tag').forEach(tag => {
-                tag.addEventListener('click', function () {
-                    this.classList.toggle('active');
-                });
-            });
-
-            // Обновление счетчика книг
-            function updateBookCount() {
-                const total = 156; // Будет из Supabase
-                const shown = Math.floor(Math.random() * (total - 100)) + 100; // Демо данные
-
-                totalBooks.textContent = total;
-                totalBooksMain.textContent = total;
-                shownBooks.textContent = shown;
+            if (!result.success) {
+                throw new Error(result.error);
             }
 
-            // Дебаунс для поиска
-            function debounce(func, wait) {
-                let timeout;
-                return function executedFunction(...args) {
-                    const later = () => {
-                        clearTimeout(timeout);
-                        func(...args);
-                    };
-                    clearTimeout(timeout);
-                    timeout = setTimeout(later, wait);
-                };
+            // Обновляем интерфейс
+            updateBooksGrid(result.books);
+            updatePagination(result.pagination);
+            updateBookCounts(result.pagination.total, result.books.length);
+            
+            booksGrid.classList.remove('data-loading');
+            booksGrid.classList.add('data-loaded');
+
+        } catch (error) {
+            console.error('Ошибка загрузки книг:', error);
+            showEmptyState('Не удалось загрузить книги. Попробуйте обновить страницу.');
+        }
+    }
+
+    // Загрузка статистики
+    async function loadStats() {
+        try {
+            const response = await fetch(`${API_BASE_URL}/stats`);
+            const result = await response.json();
+
+            if (result.success) {
+                totalBooks.textContent = result.stats.totalBooks;
+                totalBooksMain.textContent = result.stats.totalBooks;
             }
+        } catch (error) {
+            console.error('Ошибка загрузки статистики:', error);
+        }
+    }
 
-            // Инициализация
-            updateBookCount();
+    // Обновление сетки книг
+    function updateBooksGrid(books) {
+        if (!books || books.length === 0) {
+            showEmptyState('По вашему запросу ничего не найдено');
+            return;
+        }
 
-            // Пример данных для демонстрации
-            const demoBooks = [
-                {
-                    id: 1,
-                    title: "Современный JavaScript 2025",
-                    author: "Алексей Петров",
-                    year: 2025,
-                    pages: 450,
-                    tags: ["JavaScript", "ES2025", "Frontend"],
-                    category: "Программирование",
-                    description: "Полное руководство по современному JavaScript с примерами и лучшими практиками."
-                },
-                {
-                    id: 2,
-                    title: "PostgreSQL для разработчиков",
-                    author: "Мария Сидорова",
-                    year: 2024,
-                    pages: 320,
-                    tags: ["PostgreSQL", "SQL", "Базы данных"],
-                    category: "Базы данных",
-                    description: "Практическое руководство по работе с PostgreSQL от основ до продвинутых техник."
-                },
-                {
-                    id: 3,
-                    title: "React 19 и экосистема",
-                    author: "Дмитрий Иванов",
-                    year: 2025,
-                    pages: 380,
-                    tags: ["React", "TypeScript", "Frontend"],
-                    category: "Программирование",
-                    description: "Новые возможности React 19 и лучшие практики разработки современных приложений."
-                }
-            ];
+        booksGrid.innerHTML = books.map(book => `
+            <div class="book-card" data-book-id="${book.id}">
+                <div class="book-image" style="background: linear-gradient(135deg, ${book.cover_color || '#2563eb'}, var(--secondary));">
+                    <i class="fas fa-${getBookIcon(book.category)}"></i>
+                    ${book.year >= 2024 ? '<span class="book-badge">Новинка</span>' : ''}
+                </div>
+                <div class="book-content">
+                    <h3 class="book-title">${book.title}</h3>
+                    <p class="book-author">${book.author}</p>
+                    <p class="book-year">${book.year} • ${book.pages || 'N/A'} страниц</p>
+                    <div class="book-tags">
+                        ${book.tags?.map(tag => `<span class="book-tag">${tag}</span>`).join('') || ''}
+                    </div>
+                    <p class="book-description">${book.description || 'Описание отсутствует'}</p>
+                    <div class="book-actions">
+                        <button class="btn btn-primary" onclick="openBook('${book.id}')">
+                            <i class="fas fa-book-open"></i> Читать
+                        </button>
+                        <button class="btn btn-outline" onclick="showBookInfo('${book.id}')">
+                            <i class="fas fa-info-circle"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
 
-            // Команда подключит это к Supabase:
-            console.log('Готово к подключению Supabase!');
-            console.log('1. Установите @supabase/supabase-js');
-            console.log('2. Инициализируйте клиент с вашими ключами');
-            console.log('3. Используйте методы supabase.from("books").select() и т.д.');
+    // Пустое состояние
+    function showEmptyState(message) {
+        booksGrid.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-book"></i>
+                <h3>${message}</h3>
+                <p>Попробуйте изменить параметры поиска</p>
+                <button class="btn btn-primary" onclick="clearAllFilters()">
+                    <i class="fas fa-filter"></i> Сбросить фильтры
+                </button>
+            </div>
+        `;
+    }
+
+    // Обновление пагинации
+    function updatePagination(pagination) {
+        const { total, page, limit, totalPages } = pagination;
+        
+        if (totalPages <= 1) {
+            pagination.classList.add('hidden');
+            return;
+        }
+        
+        pagination.classList.remove('hidden');
+        
+        let paginationHTML = `
+            <button class="page-btn" id="prevPage" ${page <= 1 ? 'disabled' : ''}>
+                <i class="fas fa-chevron-left"></i>
+            </button>
+        `;
+
+        // Показываем ограниченное количество страниц
+        const maxVisiblePages = 5;
+        let startPage = Math.max(1, page - Math.floor(maxVisiblePages / 2));
+        let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+
+        if (endPage - startPage + 1 < maxVisiblePages) {
+            startPage = Math.max(1, endPage - maxVisiblePages + 1);
+        }
+
+        if (startPage > 1) {
+            paginationHTML += `<button class="page-btn" data-page="1">1</button>`;
+            if (startPage > 2) paginationHTML += `<span>...</span>`;
+        }
+
+        for (let i = startPage; i <= endPage; i++) {
+            paginationHTML += `
+                <button class="page-btn ${i === page ? 'active' : ''}" data-page="${i}">
+                    ${i}
+                </button>
+            `;
+        }
+
+        if (endPage < totalPages) {
+            if (endPage < totalPages - 1) paginationHTML += `<span>...</span>`;
+            paginationHTML += `<button class="page-btn" data-page="${totalPages}">${totalPages}</button>`;
+        }
+
+        paginationHTML += `
+            <button class="page-btn" id="nextPage" ${page >= totalPages ? 'disabled' : ''}>
+                <i class="fas fa-chevron-right"></i>
+            </button>
+        `;
+
+        pagination.innerHTML = paginationHTML;
+        
+        // Добавляем обработчики для кнопок пагинации
+        setupPaginationEvents();
+    }
+
+    // Обновление счетчиков
+    function updateBookCounts(total, shown) {
+        shownBooks.textContent = shown;
+        // total уже обновлен в loadStats
+    }
+
+    // Получение иконки по категории
+    function getBookIcon(category) {
+        const icons = {
+            'Программирование': 'code',
+            'Базы данных': 'database',
+            'Искусственный интеллект': 'brain',
+            'Веб-разработка': 'globe',
+            'Мобильная разработка': 'mobile-alt'
+        };
+        return icons[category] || 'book';
+    }
+
+    // Сбор фильтров из формы
+    function collectFilters() {
+        const filters = {};
+        
+        // Категории
+        const selectedCategories = Array.from(
+            document.querySelectorAll('#categoriesFilter input[type="checkbox"]:checked')
+        ).map(cb => cb.id.replace('cat-', ''));
+        
+        if (selectedCategories.length > 0) {
+            filters.categories = selectedCategories.join(',');
+        }
+
+        // Год
+        const selectedYear = document.querySelector('input[name="year"]:checked').id;
+        if (selectedYear !== 'year-all') {
+            filters.year = selectedYear.replace('year-', '');
+        }
+
+        // Теги
+        const selectedTags = Array.from(
+            document.querySelectorAll('#tagsFilter .tag.active')
+        ).map(tag => tag.textContent);
+        
+        if (selectedTags.length > 0) {
+            filters.tags = selectedTags.join(',');
+        }
+
+        // Язык
+        const selectedLanguages = Array.from(
+            document.querySelectorAll('input[name="lang"]:checked')
+        ).map(cb => cb.id.replace('lang-', ''));
+        
+        if (selectedLanguages.length > 0) {
+            filters.language = selectedLanguages.join(',');
+        }
+
+        // Поиск
+        const searchText = searchInput.value.trim();
+        if (searchText) {
+            filters.search = searchText;
+        }
+
+        currentFilters = filters;
+        return filters;
+    }
+
+    // Настройка обработчиков событий
+    function setupEventListeners() {
+        // Тема
+        themeToggle.addEventListener('click', () => {
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            document.documentElement.setAttribute('data-theme', isDark ? 'light' : 'dark');
+            themeToggle.innerHTML = isDark ? '<i class="fas fa-moon"></i>' : '<i class="fas fa-sun"></i>';
         });
-    </script>
+
+        // Сброс фильтров
+        clearFilters.addEventListener('click', clearAllFilters);
+
+        // Поиск
+        searchInput.addEventListener('input', debounce(() => {
+            applyFilters();
+        }, 500));
+
+        // Применение фильтров
+        applyFiltersBtn.addEventListener('click', applyFilters);
+
+        // Теги
+        document.querySelectorAll('#tagsFilter .tag').forEach(tag => {
+            tag.addEventListener('click', function () {
+                this.classList.toggle('active');
+            });
+        });
+    }
+
+    // Настройка пагинации
+    function setupPaginationEvents() {
+        document.getElementById('prevPage')?.addEventListener('click', () => {
+            if (currentPage > 1) {
+                currentPage--;
+                loadBooks(currentFilters, currentPage);
+            }
+        });
+
+        document.getElementById('nextPage')?.addEventListener('click', () => {
+            currentPage++;
+            loadBooks(currentFilters, currentPage);
+        });
+
+        document.querySelectorAll('.page-btn[data-page]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                currentPage = parseInt(btn.dataset.page);
+                loadBooks(currentFilters, currentPage);
+            });
+        });
+    }
+
+    // Применение фильтров
+    async function applyFilters() {
+        currentPage = 1;
+        const filters = collectFilters();
+        await loadBooks(filters);
+    }
+
+    // Сброс всех фильтров
+    function clearAllFilters() {
+        document.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+        document.querySelectorAll('input[type="radio"]').forEach(rb => {
+            if (rb.id === 'year-all') rb.checked = true;
+        });
+        document.querySelectorAll('.tag').forEach(tag => tag.classList.remove('active'));
+        searchInput.value = '';
+        
+        document.getElementById('cat-programming').checked = true;
+        document.getElementById('lang-ru').checked = true;
+        document.getElementById('lang-en').checked = true;
+        
+        currentFilters = {};
+        applyFilters();
+    }
+
+    // Открытие книги
+    async function openBook(bookId) {
+        try {
+            // Увеличиваем счетчик просмотров
+            await fetch(`${API_BASE_URL}/books/view/${bookId}`, { method: 'POST' });
+            
+            // Получаем информацию о книге
+            const response = await fetch(`${API_BASE_URL}/books/${bookId}`);
+            const result = await response.json();
+            
+            if (result.success && result.book.download_url) {
+                window.open(result.book.download_url, '_blank');
+            } else {
+                alert('Ссылка на книгу временно недоступна');
+            }
+        } catch (error) {
+            console.error('Ошибка открытия книги:', error);
+            alert('Не удалось открыть книгу');
+        }
+    }
+
+    // Показать информацию о книге
+    async function showBookInfo(bookId) {
+        try {
+            const response = await fetch(`${API_BASE_URL}/books/${bookId}`);
+            const result = await response.json();
+            
+            if (result.success) {
+                const book = result.book;
+                alert(`
+                    ${book.title}
+                    
+                    Автор: ${book.author}
+                    Год: ${book.year}
+                    Страниц: ${book.pages || 'Не указано'}
+                    Категория: ${book.category}
+                    Язык: ${book.language === 'ru' ? 'Русский' : 'Английский'}
+                    
+                    ${book.description}
+                `);
+            }
+        } catch (error) {
+            console.error('Ошибка загрузки информации:', error);
+            alert('Не удалось загрузить информацию о книге');
+        }
+    }
+
+    // Дебаунс
+    function debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    }
+</script>
 </body>
+
 
 </html>
