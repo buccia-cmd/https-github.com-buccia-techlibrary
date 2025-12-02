@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Библиотека</title>
+</head>
+<body>
+  <h1>Библиотека книг</h1>
+  <div id="books"></div>
+  <script>
+    async function loadBooks() {
+      const res = await fetch('/api/books');
+      const books = await res.json();
+      document.getElementById('books').innerHTML = books
+        .map(b => `
+          <div style="border:1px solid #ccc;padding:10px;margin:10px;">
+            <h3>${b.title}</h3>
+            <p><b>Автор:</b> ${b.author || '-'}</p>
+            <p>${b.description || ''}</p>
+          </div>
+        `).join('');
+    }
+    loadBooks();
+  </script>
+</body>
+</html>
