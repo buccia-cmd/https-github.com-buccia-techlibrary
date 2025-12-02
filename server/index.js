@@ -28,6 +28,21 @@ app.use(express.static(path.join(__dirname, '../client')));
 
 // Подключаем Supabase
 const supabaseClient = require('./supabase');
+const { supabase, testConnection } = require('./supabase');
+
+// Проверка подключения при запуске
+app.listen(PORT, async () => {
+  console.log(`🚀 Сервер запущен на порту ${PORT}`);
+  
+  // Проверяем подключение к Supabase
+  const isConnected = await testConnection();
+  if (!isConnected) {
+    console.log('⚠️  Supabase не подключен, но сервер работает');
+    console.log('📚 Будут использоваться демо-данные');
+  }
+  
+  console.log(`🌐 Откройте: http://localhost:${PORT}`);
+});
 
 // API Routes
 app.get('/api/books', async (req, res) => {
