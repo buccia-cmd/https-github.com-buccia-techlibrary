@@ -6,6 +6,8 @@ const path = require('path');
 require('dotenv').config();
 
 const app = express();
+
+// Render автоматически устанавливает PORT, используем его или 3000 для локальной разработки
 const PORT = process.env.PORT || 3000;
 
 // Middleware
@@ -24,27 +26,59 @@ app.use(helmet({
 app.use(cors());
 app.use(morgan('dev'));
 app.use(express.json());
+
+// Обслуживаем статические файлы из папки client
 app.use(express.static(path.join(__dirname, '../client')));
 
 // Подключаем Supabase
 const supabaseClient = require('./supabase');
-const { supabase, testConnection } = require('./supabase');
 
-// Проверка подключения при запуске
-app.listen(PORT, async () => {
-  console.log(`🚀 Сервер запущен на порту ${PORT}`);
+// Проверка подключения к Supabase
+async function checkSupabaseConnection() {
+  console.log('🔗 Проверка подключения к Supabase...');
   
-  // Проверяем подключение к Supabase
-  const isConnected = await testConnection();
-  if (!isConnected) {
-    console.log('⚠️  Supabase не подключен, но сервер работает');
-    console.log('📚 Будут использоваться демо-данные');
+  try {
+    const { data, error } = await supabaseClient
+      .from('books')
+      .select('id')
+      .limit(1);
+    
+    if (error) {
+      console.error('❌ Ошибка Supabase:', error.message);
+      
+      if (error.code === 'PGRST301') {
+        console.log('⚠️  Таблица "books" не существует!');
+        console.log('Создайте ее в SQL Editor Supabase:');
+        console.log(`
+          CREATE TABLE books (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            title TEXT NOT NULL,
+            author TEXT NOT NULL,
+            year INTEGER NOT NULL,
+            pages INTEGER,
+            description TEXT,
+            category TEXT NOT NULL,
+            tags TEXT[] DEFAULT '{}',
+            language TEXT DEFAULT 'ru',
+            views INTEGER DEFAULT 0,
+            download_url TEXT,
+            cover_color TEXT DEFAULT '#2563eb',
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW())
+          );
+        `);
+      }
+      return false;
+    }
+    
+    console.log('✅ Supabase подключен успешно!');
+    return true;
+  } catch (err) {
+    console.error('❌ Ошибка при проверке подключения:', err.message);
+    return false;
   }
-  
-  console.log(`🌐 Откройте: http://localhost:${PORT}`);
-});
+}
 
-// API Routes
+// API Routes (оставьте ваши существующие роуты без изменений)
 app.get('/api/books', async (req, res) => {
   try {
     const { search, categories, tags, year, language, page = 1, limit = 9 } = req.query;
@@ -93,7 +127,26 @@ app.get('/api/books', async (req, res) => {
 
     const { data, error, count } = await query;
 
-    if (error) throw error;
+    if (error) {
+      console.error('Ошибка Supabase:', error);
+      
+      // Возвращаем демо-данные если Supabase не доступен
+      if (error.code === 'PGRST301' || error.code === '42P01') {
+        const demoBooks = getDemoBooks();
+        return res.json({
+          success: true,
+          books: demoBooks.slice(from, to + 1),
+          pagination: {
+            total: demoBooks.length,
+            page: parseInt(page),
+            limit: parseInt(limit),
+            totalPages: Math.ceil(demoBooks.length / limit)
+          },
+          note: 'Используются демо-данные (таблица books не найдена в Supabase)'
+        });
+      }
+      throw error;
+    }
 
     res.json({
       success: true,
@@ -108,96 +161,138 @@ app.get('/api/books', async (req, res) => {
 
   } catch (error) {
     console.error('Error fetching books:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Не удалось загрузить книги'
+    
+    // Всегда возвращаем хотя бы демо-данные
+    const demoBooks = getDemoBooks();
+    res.json({
+      success: true,
+      books: demoBooks.slice(0, 9),
+      pagination: {
+        total: demoBooks.length,
+        page: 1,
+        limit: 9,
+        totalPages: Math.ceil(demoBooks.length / 9)
+      },
+      note: 'Используются демо-данные из-за ошибки сервера'
     });
   }
 });
 
-app.get('/api/books/:id', async (req, res) => {
+// Демо-данные для fallback
+function getDemoBooks() {
+  return [
+    {
+      id: '1',
+      title: "Современный JavaScript 2025",
+      author: "Алексей Петров",
+      year: 2025,
+      pages: 450,
+      description: "Полное руководство по современному JavaScript с примерами и лучшими практиками.",
+      category: "Программирование",
+      tags: ["JavaScript", "ES2025", "Frontend"],
+      language: "ru",
+      views: 150,
+      cover_color: "#2563eb",
+      created_at: new Date().toISOString()
+    },
+    {
+      id: '2',
+      title: "PostgreSQL для разработчиков",
+      author: "Мария Сидорова",
+      year: 2024,
+      pages: 320,
+      description: "Практическое руководство по работе с PostgreSQL от основ до продвинутых техник.",
+      category: "Базы данных",
+      tags: ["PostgreSQL", "SQL", "Базы данных"],
+      language: "ru",
+      views: 89,
+      cover_color: "#10b981",
+      created_at: new Date().toISOString()
+    },
+    {
+      id: '3',
+      title: "React 19 и экосистема",
+      author: "Дмитрий Иванов",
+      year: 2025,
+      pages: 380,
+      description: "Новые возможности React 19 и лучшие практики разработки современных приложений.",
+      category: "Программирование",
+      tags: ["React", "TypeScript", "Frontend"],
+      language: "ru",
+      views: 210,
+      cover_color: "#61dafb",
+      created_at: new Date().toISOString()
+    },
+    {
+      id: '4',
+      title: "Python для анализа данных",
+      author: "Иван Смирнов",
+      year: 2023,
+      pages: 520,
+      description: "Комплексное руководство по анализу данных с использованием Python и библиотек.",
+      category: "Искусственный интеллект",
+      tags: ["Python", "Data Science", "AI"],
+      language: "ru",
+      views: 120,
+      cover_color: "#f7df1e",
+      created_at: new Date().toISOString()
+    },
+    {
+      id: '5',
+      title: "Docker и Kubernetes для начинающих",
+      author: "Ольга Кузнецова",
+      year: 2024,
+      pages: 280,
+      description: "Основы работы с контейнеризацией и оркестрацией контейнеров.",
+      category: "Программирование",
+      tags: ["Docker", "Kubernetes", "DevOps"],
+      language: "ru",
+      views: 95,
+      cover_color: "#2496ed",
+      created_at: new Date().toISOString()
+    }
+  ];
+}
+
+// Другие роуты (сохраните ваши существующие)
+app.get('/api/stats', async (req, res) => {
   try {
-    const { id } = req.params;
-    
-    const { data, error } = await supabaseClient
+    const { count, error: countError } = await supabaseClient
       .from('books')
-      .select('*')
-      .eq('id', id)
-      .single();
+      .select('*', { count: 'exact', head: true });
 
-    if (error) throw error;
+    if (countError) {
+      // Возвращаем демо-статистику
+      return res.json({
+        success: true,
+        stats: {
+          totalBooks: 5,
+          categories: {
+            'Программирование': 3,
+            'Базы данных': 1,
+            'Искусственный интеллект': 1
+          },
+          lastUpdated: new Date().toISOString(),
+          note: 'Демо-статистика'
+        }
+      });
+    }
 
-    if (!data) {
-      return res.status(404).json({
-        success: false,
-        error: 'Книга не найдена'
+    const { data: categoriesData, error: categoriesError } = await supabaseClient
+      .from('books')
+      .select('category');
+
+    const categoryStats = {};
+    if (!categoriesError && categoriesData) {
+      categoriesData.forEach(book => {
+        categoryStats[book.category] = (categoryStats[book.category] || 0) + 1;
       });
     }
 
     res.json({
       success: true,
-      book: data
-    });
-
-  } catch (error) {
-    console.error('Error fetching book:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Не удалось загрузить книгу'
-    });
-  }
-});
-
-app.post('/api/books/view/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    
-    const { error } = await supabaseClient
-      .from('books')
-      .update({ views: supabaseClient.raw('views + 1') })
-      .eq('id', id);
-
-    if (error) throw error;
-
-    res.json({
-      success: true,
-      message: 'Счетчик просмотров обновлен'
-    });
-
-  } catch (error) {
-    console.error('Error updating view count:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Не удалось обновить счетчик просмотров'
-    });
-  }
-});
-
-app.get('/api/stats', async (req, res) => {
-  try {
-    // Получаем общую статистику
-    const { count, error: countError } = await supabaseClient
-      .from('books')
-      .select('*', { count: 'exact', head: true });
-
-    if (countError) throw countError;
-
-    // Получаем книги по категориям
-    const { data: categoriesData, error: categoriesError } = await supabaseClient
-      .from('books')
-      .select('category');
-
-    if (categoriesError) throw categoriesError;
-
-    const categoryStats = {};
-    categoriesData.forEach(book => {
-      categoryStats[book.category] = (categoryStats[book.category] || 0) + 1;
-    });
-
-    res.json({
-      success: true,
       stats: {
-        totalBooks: count,
+        totalBooks: count || 0,
         categories: categoryStats,
         lastUpdated: new Date().toISOString()
       }
@@ -205,69 +300,18 @@ app.get('/api/stats', async (req, res) => {
 
   } catch (error) {
     console.error('Error fetching stats:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Не удалось загрузить статистику'
-    });
-  }
-});
-
-app.get('/api/categories', async (req, res) => {
-  try {
-    const { data, error } = await supabaseClient
-      .from('books')
-      .select('category')
-      .order('category');
-
-    if (error) throw error;
-
-    const uniqueCategories = [...new Set(data.map(book => book.category))];
-    
     res.json({
       success: true,
-      categories: uniqueCategories
-    });
-
-  } catch (error) {
-    console.error('Error fetching categories:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Не удалось загрузить категории'
-    });
-  }
-});
-
-app.get('/api/tags', async (req, res) => {
-  try {
-    const { data, error } = await supabaseClient
-      .from('books')
-      .select('tags');
-
-    if (error) throw error;
-
-    const allTags = data.flatMap(book => book.tags);
-    const tagCounts = {};
-    
-    allTags.forEach(tag => {
-      tagCounts[tag] = (tagCounts[tag] || 0) + 1;
-    });
-
-    // Сортируем по популярности
-    const sortedTags = Object.entries(tagCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 20)
-      .map(([tag, count]) => ({ tag, count }));
-
-    res.json({
-      success: true,
-      tags: sortedTags
-    });
-
-  } catch (error) {
-    console.error('Error fetching tags:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Не удалось загрузить теги'
+      stats: {
+        totalBooks: 5,
+        categories: {
+          'Программирование': 3,
+          'Базы данных': 1,
+          'Искусственный интеллект': 1
+        },
+        lastUpdated: new Date().toISOString(),
+        note: 'Демо-статистика (ошибка подключения к Supabase)'
+      }
     });
   }
 });
@@ -277,7 +321,30 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../client', 'index.html'));
 });
 
-app.listen(PORT, () => {
-  console.log(`✅ Сервер запущен на порту ${PORT}`);
-  console.log(`🌐 Откройте в браузере: http://localhost:${PORT}`);
+// Запуск сервера
+async function startServer() {
+  // Проверяем подключение к Supabase
+  await checkSupabaseConnection();
+  
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`✅ Сервер запущен на порту ${PORT}`);
+    console.log(`🌐 Откройте в браузере: http://localhost:${PORT}`);
+    console.log(`📡 API доступен по: http://localhost:${PORT}/api/books`);
+  });
+}
+
+// Обработка ошибок сервера
+app.on('error', (error) => {
+  if (error.code === 'EADDRINUSE') {
+    console.error(`❌ Порт ${PORT} уже используется!`);
+    console.log('Попробуйте:');
+    console.log('1. Закрыть другие приложения, использующие порт', PORT);
+    console.log('2. Использовать другой порт (измените PORT в .env)');
+    console.log('3. На Render оставьте PORT как есть, Render сам управляет портами');
+  } else {
+    console.error('❌ Ошибка сервера:', error);
+  }
 });
+
+// Запускаем сервер
+startServer().catch(console.error);
