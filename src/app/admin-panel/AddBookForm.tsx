@@ -15,7 +15,8 @@ interface AddBookFormProps {
 }
 
 export default function AddBookForm({ onSubmit, uploadingPDF, storageReady = true }: AddBookFormProps) {
-  const [formData, setFormData] = useState<NewBook>({
+  // Используем правильные начальные значения
+  const [formData, setFormData] = useState<Omit<NewBook, 'id'>>({
     title: '',
     author: '',
     description: '',
@@ -23,49 +24,89 @@ export default function AddBookForm({ onSubmit, uploadingPDF, storageReady = tru
     pages: 0,
     category: 'programming',
     tags: [],
-    pdf_url: '',
-    // Убрали cover_url из начального состояния
+    pdf_url: null, // null вместо пустой строки
   });
   
   const [pdfFile, setPdfFile] = useState<File | null>(null);
-  const [coverFile, setCoverFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     
-    setFormData(prev => ({
-      ...prev,
-      [name]: name === 'tags' ? value.split(',').map(tag => tag.trim()) : 
-              name === 'year' || name === 'pages' ? parseInt(value) || 0 : value
-    }));
+    setFormData(prev => {
+      if (name === 'tags') {
+        // Фильтруем пустые теги
+        const tagsArray = value.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0);
+        return { ...prev, tags: tagsArray };
+      }
+      
+      if (name === 'year' || name === 'pages') {
+        const numValue = parseInt(value);
+        return { ...prev, [name]: isNaN(numValue) ? 0 : numValue };
+      }
+      
+      if (name === 'pdf_url') {
+        // Если URL очищается, устанавливаем null
+        return { ...prev, [name]: value.trim() === '' ? null : value.trim() };
+      }
+      
+      return { ...prev, [name]: value };
+    });
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'pdf' | 'cover') => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (type === 'pdf') {
-        setPdfFile(file);
-      } else {
-        setCoverFile(file);
-        // Только локальное сохранение
-        const reader = new FileReader();
-        reader.onload = () => {
-          console.log('Обложка сохранена локально');
-        };
-        reader.readAsDataURL(file);
+      if (file.type !== 'application/pdf') {
+        setMessage({ 
+          type: 'error', 
+          text: 'Пожалуйста, выберите PDF файл' 
+        });
+        return;
       }
+      
+      if (file.size > 50 * 1024 * 1024) { // 50MB лимит
+        setMessage({ 
+          type: 'error', 
+          text: 'Файл слишком большой. Максимум 50MB' 
+        });
+        return;
+      }
+      
+      setPdfFile(file);
+      setMessage(null);
+      
+      // Очищаем URL если загружаем файл
+      setFormData(prev => ({ ...prev, pdf_url: null }));
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!formData.title || !formData.author) {
+    // Валидация
+    if (!formData.title.trim()) {
       setMessage({ 
         type: 'error', 
-        text: 'Заполните обязательные поля: название и автор' 
+        text: 'Введите название книги' 
+      });
+      return;
+    }
+    
+    if (!formData.author.trim()) {
+      setMessage({ 
+        type: 'error', 
+        text: 'Введите автора книги' 
+      });
+      return;
+    }
+    
+    // Проверяем что есть либо файл, либо URL
+    if (!pdfFile && !formData.pdf_url) {
+      setMessage({ 
+        type: 'error', 
+        text: 'Загрузите PDF файл или укажите ссылку на PDF' 
       });
       return;
     }
@@ -74,17 +115,15 @@ export default function AddBookForm({ onSubmit, uploadingPDF, storageReady = tru
     setMessage(null);
 
     try {
-      // Создаем копию для отправки - БЕЗ cover_url
+      // Подготавливаем данные для отправки
       const bookToSubmit: NewBook = {
-        title: formData.title,
-        author: formData.author,
-        description: formData.description || '',
-        year: formData.year,
-        pages: formData.pages,
-        category: formData.category || 'programming',
-        tags: formData.tags || [],
-        pdf_url: formData.pdf_url || null,
-        // Не отправляем cover_url
+        ...formData,
+        // Убедимся что year и pages числа
+        year: typeof formData.year === 'number' ? formData.year : parseInt(String(formData.year)) || new Date().getFullYear(),
+        pages: typeof formData.pages === 'number' ? formData.pages : parseInt(String(formData.pages)) || 0,
+        // Убедимся что tags это массив строк
+        tags: Array.isArray(formData.tags) ? formData.tags : [],
+        // pdf_url уже обработан в handleInputChange
       };
       
       const result = await onSubmit(bookToSubmit, pdfFile || undefined);
@@ -95,7 +134,7 @@ export default function AddBookForm({ onSubmit, uploadingPDF, storageReady = tru
       });
       
       if (result.success) {
-        // Сброс формы
+        // Сброс формы только при успехе
         setFormData({
           title: '',
           author: '',
@@ -104,17 +143,21 @@ export default function AddBookForm({ onSubmit, uploadingPDF, storageReady = tru
           pages: 0,
           category: 'programming',
           tags: [],
-          pdf_url: '',
+          pdf_url: null,
         });
         setPdfFile(null);
-        setCoverFile(null);
+        
+        // Сброс input файла
+        const fileInput = document.getElementById('pdf') as HTMLInputElement;
+        if (fileInput) fileInput.value = '';
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Неизвестная ошибка';
       setMessage({ 
         type: 'error', 
-        text: `Произошла ошибка: ${errorMessage}` 
+        text: `Ошибка: ${errorMessage}` 
       });
+      console.error('Form submission error:', err);
     } finally {
       setLoading(false);
     }
@@ -133,6 +176,7 @@ export default function AddBookForm({ onSubmit, uploadingPDF, storageReady = tru
             onChange={handleInputChange}
             required
             placeholder="Введите название книги"
+            disabled={loading || uploadingPDF}
           />
         </div>
 
@@ -146,6 +190,7 @@ export default function AddBookForm({ onSubmit, uploadingPDF, storageReady = tru
             onChange={handleInputChange}
             required
             placeholder="Введите имя автора"
+            disabled={loading || uploadingPDF}
           />
         </div>
 
@@ -154,8 +199,9 @@ export default function AddBookForm({ onSubmit, uploadingPDF, storageReady = tru
           <select
             id="category"
             name="category"
-            value={formData.category || 'programming'}
+            value={formData.category}
             onChange={handleInputChange}
+            disabled={loading || uploadingPDF}
           >
             <option value="programming">Программирование</option>
             <option value="design">Дизайн</option>
@@ -177,6 +223,7 @@ export default function AddBookForm({ onSubmit, uploadingPDF, storageReady = tru
             min="1900"
             max={new Date().getFullYear()}
             placeholder="2024"
+            disabled={loading || uploadingPDF}
           />
         </div>
 
@@ -190,6 +237,7 @@ export default function AddBookForm({ onSubmit, uploadingPDF, storageReady = tru
             onChange={handleInputChange}
             min="0"
             placeholder="0"
+            disabled={loading || uploadingPDF}
           />
         </div>
 
@@ -202,6 +250,7 @@ export default function AddBookForm({ onSubmit, uploadingPDF, storageReady = tru
             value={formData.tags?.join(', ') || ''}
             onChange={handleInputChange}
             placeholder="javascript, react, programming"
+            disabled={loading || uploadingPDF}
           />
         </div>
 
@@ -214,20 +263,23 @@ export default function AddBookForm({ onSubmit, uploadingPDF, storageReady = tru
             onChange={handleInputChange}
             rows={4}
             placeholder="Введите описание книги..."
+            disabled={loading || uploadingPDF}
           />
         </div>
 
         <div className="form-group">
           <label htmlFor="pdf">
-            PDF файл книги 
+            PDF файл книги *
             {!storageReady && <span className="warning-text"> (Создайте bucket pdf-books)</span>}
           </label>
           <input
             type="file"
             id="pdf"
-            accept=".pdf"
-            onChange={(e) => handleFileChange(e, 'pdf')}
-            disabled={uploadingPDF || !storageReady}
+            name="pdf"
+            accept=".pdf,application/pdf"
+            onChange={handleFileChange}
+            disabled={loading || uploadingPDF || !storageReady}
+            required={!formData.pdf_url} // Обязательно если нет URL
           />
           {pdfFile && (
             <div className="file-info">
@@ -240,28 +292,18 @@ export default function AddBookForm({ onSubmit, uploadingPDF, storageReady = tru
           {uploadingPDF && <p className="uploading-text">Загрузка PDF...</p>}
           {!storageReady && (
             <p className="warning-text">
-              ⚠️ Создайте bucket <strong>pdf-books</strong> в Supabase Dashboard для загрузки файлов
+              ⚠️ Создайте bucket <strong>pdf-books</strong> в Supabase Dashboard
             </p>
           )}
         </div>
 
-        <div className="form-group" style={{ display: 'none' }}>
-          <label htmlFor="cover">Обложка (только локально)</label>
-          <input
-            type="file"
-            id="cover"
-            accept="image/*"
-            onChange={(e) => handleFileChange(e, 'cover')}
-          />
-          {coverFile && (
-            <div className="file-info">
-              <span>🖼️ {coverFile.name} (сохранена локально)</span>
-            </div>
-          )}
-        </div>
-
         <div className="form-group full-width">
-          <label htmlFor="pdf_url">Ссылка на PDF (URL, альтернатива файлу)</label>
+          <label htmlFor="pdf_url">
+            ИЛИ ссылка на PDF (URL)
+            <small style={{ marginLeft: '8px', color: '#666' }}>
+              (если нет файла для загрузки)
+            </small>
+          </label>
           <input
             type="url"
             id="pdf_url"
@@ -269,7 +311,13 @@ export default function AddBookForm({ onSubmit, uploadingPDF, storageReady = tru
             value={formData.pdf_url || ''}
             onChange={handleInputChange}
             placeholder="https://example.com/book.pdf"
+            disabled={loading || uploadingPDF || !!pdfFile}
           />
+          {pdfFile && (
+            <p className="info-text">
+              ⓘ При загрузке файла ссылка будет проигнорирована
+            </p>
+          )}
         </div>
       </div>
 
@@ -282,10 +330,11 @@ export default function AddBookForm({ onSubmit, uploadingPDF, storageReady = tru
       <div className="form-actions">
         <button 
           type="submit" 
-          disabled={loading || uploadingPDF}
-          className="submit-btn"
+          disabled={loading || uploadingPDF || (!pdfFile && !formData.pdf_url)}
+          className={`submit-btn ${loading ? 'loading' : ''}`}
         >
-          {loading ? '⏳ Добавление...' : '➕ Добавить книгу'}
+          {loading ? '⏳ Добавление...' : 
+           uploadingPDF ? '📤 Загрузка файла...' : '➕ Добавить книгу'}
         </button>
       </div>
     </form>
